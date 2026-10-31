@@ -155,7 +155,7 @@
   <p class="msg" id="empty" role="status"></p>
 </section>
 
-<a class="back" id="back" href="./" data-nav hidden>&larr; Timers</a>
+<a class="back" id="back" href="#" hidden>&larr; Timers</a>
 <main id="timerView" hidden>
   <section class="display" id="display" aria-label="Countdown">
     <div class="banner" id="banner" role="alert" hidden></div>
@@ -609,7 +609,7 @@ const firebaseConfig = {
     listEl.textContent = "";
     rows.forEach(function (r) {
       var li = document.createElement("li"), a = document.createElement("a");
-      a.className = "name"; a.href = BASE + r.k; a.setAttribute("data-nav", ""); a.textContent = r.name; li.appendChild(a);
+      a.className = "name"; a.href = "#" + r.k; a.textContent = r.name; li.appendChild(a);
       if (r.tag) { var tg = document.createElement("span"); tg.className = "tag"; tg.textContent = r.tag; li.appendChild(tg); }
       if (r.del) {
         var b = document.createElement("button"); b.type = "button"; b.className = "outline"; b.textContent = "Delete";
@@ -654,21 +654,13 @@ const firebaseConfig = {
     ["done", "flash", "go", "compact"].forEach(function (c) { document.body.classList.remove(c); });
     timeEl.textContent = "--:--"; statusEl.textContent = ""; fitLen = -1;
   }
-  // Clean links like /synced-timer/x08. GitHub Pages sends unknown paths to 404.html, which bounces back here with ?p=x08.
-  var BASE = location.pathname.replace(/[^\/]*$/, "");          // e.g. "/synced-timer/"
+  // Links look like .../synced-timer/#x08. Older link styles (#/t/x08) are converted.
   (function () {
-    var p = new URLSearchParams(location.search).get("p"), h = /^#\/t\/([A-Za-z0-9-]+)$/.exec(location.hash);
-    if (p !== null) history.replaceState(null, "", BASE + p);
-    else if (h) history.replaceState(null, "", BASE + h[1].toLowerCase());   // old #/t/name links
+    var h = /^#\/t\/([A-Za-z0-9-]+)$/.exec(location.hash);
+    if (h) history.replaceState(null, "", location.pathname + "#" + h[1].toLowerCase());
   })();
-  function go(path) { history.pushState(null, "", BASE + path); route(); }
-  document.addEventListener("click", function (e) {
-    var a = e.target.closest && e.target.closest("a[data-nav]");
-    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
-    e.preventDefault(); go(a.getAttribute("href") === "./" ? "" : a.getAttribute("href").slice(BASE.length));
-  });
   function route() {
-    var m = /^([A-Za-z0-9-]+)\/?$/.exec(location.pathname.slice(BASE.length));
+    var m = /^#(?:\/t)?\/?([A-Za-z0-9-]+)$/.exec(location.hash);
     if (m) {
       var key = m[1].toLowerCase();
       if (curKey === key) return;
@@ -686,7 +678,7 @@ const firebaseConfig = {
       renderHome();
     }
   }
-  window.addEventListener("popstate", route);
+  window.addEventListener("hashchange", route);
 
   /* ---- connect to Firebase ---- */
   var slow = setTimeout(function () {
