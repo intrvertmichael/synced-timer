@@ -22,6 +22,7 @@
   /* Always white with black text, whatever the viewer's theme. */
   :root { color-scheme: light; }
   [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* stop phones from enlarging the digits */
   * { box-sizing: border-box; }
   body {
     background: var(--bg); color: var(--fg);
@@ -289,17 +290,29 @@ const firebaseConfig = {
   }
   // Make the digits exactly 80% of the page width (never wider than the box they sit in).
   var fitLen = -1;
+  function fitTarget() { return Math.min(window.innerWidth * 0.8, displayEl.clientWidth - 32); }
   function fit() {
-    var target = Math.min(window.innerWidth * 0.8, displayEl.clientWidth - 32);
+    var target = fitTarget();
     timeEl.style.fontSize = "100px";
     var w = timeEl.getBoundingClientRect().width;
     if (w > 0 && target > 0) timeEl.style.fontSize = (100 * target / w) + "px";
     fitLen = timeEl.textContent.length;
   }
+  // Re-check often: the web font can arrive after the first fit, the phone can rotate, scrollbars can appear.
+  function fitIfNeeded() {
+    var target = fitTarget(), w = timeEl.getBoundingClientRect().width;
+    if (target > 0 && Math.abs(w - target) / target > 0.01) fit();
+  }
   window.addEventListener("resize", fit);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  window.addEventListener("orientationchange", function () { setTimeout(fit, 200); });
+  window.addEventListener("load", fit);
+  if (document.fonts) {
+    if (document.fonts.ready) document.fonts.ready.then(fit);
+    if (document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", fit);
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitIfNeeded).observe(displayEl);
   function render() {
-    if (timeEl.textContent.length !== fitLen) fit();
+    if (timeEl.textContent.length !== fitLen) fit(); else fitIfNeeded();
     if (!state) {
       displayEl.classList.remove("done");
       if (connected) {                       // nothing running: show the default time and no message
