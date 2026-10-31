@@ -158,7 +158,7 @@ const firebaseConfig = {
   var SOUND_HINT = "Tap anywhere on this page once so your device allows sound.";
   var timerRef = null, state = null, offset = 0, canWrite = true, connected = false, unlocked = false, ready = false, myId = null;
   var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, debounce = null;
-  var pending = 0, syncTimer = null, syncMsgTimer = null;
+  var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "";
   var flashTimer = null, bannerTimer = null;
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
@@ -272,9 +272,14 @@ const firebaseConfig = {
   }
   function render() {
     if (!state) {
-      timeEl.textContent = "--:--";
       displayEl.classList.remove("done");
-      statusEl.textContent = connected ? "Waiting for the timer to be set" : "Connecting";
+      if (connected) {                       // nothing running: show the default time and no message
+        timeEl.textContent = fmt(duration());
+        statusEl.textContent = "";
+      } else {                               // still asking Firebase whether a timer exists
+        timeEl.textContent = "--:--";
+        statusEl.textContent = errMsg || "Searching for timers";
+      }
       setHint(); updateControls();
       return;
     }
@@ -368,7 +373,7 @@ const firebaseConfig = {
 
   /* ---- connect to Firebase ---- */
   var slow = setTimeout(function () {
-    if (!connected) { statusEl.textContent = "Can't reach the timer yet"; }
+    if (!connected) { errMsg = "Can't reach the timer yet"; render(); }
   }, 10000);
 
   try {
@@ -377,12 +382,12 @@ const firebaseConfig = {
     timerRef = ref(db, "timer");
     onValue(ref(db, ".info/serverTimeOffset"), function (snap) { offset = snap.val() || 0; });
     onValue(timerRef, function (snap) {
-      connected = true; clearTimeout(slow);
+      connected = true; errMsg = ""; clearTimeout(slow);
       var d = snap.val();
       state = (d && typeof d.durationMs === "number") ? d : null;
       render();
     }, function () {
-      clearTimeout(slow); statusEl.textContent = "Can't reach the timer";
+      clearTimeout(slow); errMsg = "Can't reach the timer"; render();
     });
     // Anonymous sign-in gives each browser a private ID (no login). It is how "only the starter can stop it" is enforced.
     var auth = getAuth(app);
@@ -392,7 +397,7 @@ const firebaseConfig = {
       canWrite = false; ready = true; render();
     });
   } catch (e) {
-    clearTimeout(slow); statusEl.textContent = "Can't reach the timer";
+    clearTimeout(slow); errMsg = "Can't reach the timer"; render();
   }
 })();
 </script>
