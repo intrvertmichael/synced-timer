@@ -94,6 +94,7 @@
     padding: 8px 20px; border-radius: 12px; font-weight: 600; font-size: 1.2rem; text-transform: uppercase; letter-spacing: .08em;
     white-space: nowrap; max-width: 100%;
   }
+  .banner.red { background: var(--red); color: #fff; border-color: #fff; }
   @keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -30%); } to { opacity: 1; transform: translate(-50%, -50%); } }
   @media (max-width: 480px) { .syncing { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } .banner { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } }
 
@@ -204,12 +205,17 @@ const firebaseConfig = {
     document.body.classList.remove("go"); void document.body.offsetWidth; document.body.classList.add("go");
     clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 1000);
   }
-  function notify(text) {
+  // Notice boxes disappear after 4 seconds.
+  function showBanner(text, red) {
     bannerEl.textContent = text;
+    bannerEl.classList.toggle("red", !!red);
     bannerEl.hidden = false;
+    clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 4000);
+  }
+  function notify(text) {
+    showBanner(text, false);
     document.body.classList.remove("flash"); void document.body.offsetWidth; document.body.classList.add("flash");
     clearTimeout(flashTimer); flashTimer = setTimeout(function () { document.body.classList.remove("flash"); }, 2200);
-    clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 4500);
   }
 
   /* ---- sounds ---- */
@@ -365,9 +371,7 @@ const firebaseConfig = {
     document.body.classList.toggle("done", done);
     if (done) {
       document.body.classList.remove("flash");
-      clearTimeout(bannerTimer);                 // stays up until the timer is started again
-      if (bannerEl.hidden || bannerEl.textContent !== "Time is up") { bannerEl.textContent = "Time is up"; bannerEl.hidden = false; }
-      doneShown = true;
+      if (!doneShown) { doneShown = true; showBanner("Time is up", true); }   // shown once, then it goes away; the page stays red
     } else if (doneShown) { bannerEl.hidden = true; doneShown = false; }
     statusEl.textContent = paused ? "Paused" : "";
 
