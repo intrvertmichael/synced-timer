@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Shared Timer</title>
+<title>Timers</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@600&display=swap">
 <style>
   html { margin: 0; } body { margin: 0; }
@@ -124,11 +124,39 @@
   .set input:disabled, .set select:disabled { color: var(--muted); border-bottom-color: var(--muted); }
   .btns { display: flex; gap: 12px; flex: 1 1 200px; }
   .btns button { flex: 1; }
+  /* homepage: search, create, list */
+  .home { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .home input {
+    font: inherit; font-size: 1.2rem; color: var(--fg); background: transparent; width: 100%; min-width: 0;
+    padding: 12px 16px; min-height: 48px; border: 2px solid var(--fg); border-radius: 14px;
+  }
+  .create { display: flex; gap: 12px; }
+  .msg { color: var(--muted); margin: 0; min-height: 1.4em; }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #ddd; padding: 4px 0; }
+  .list a.name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 600; font-size: 1.4rem; color: var(--fg); text-decoration: none; padding: 10px 0; }
+  .list .tag { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: .85rem; }
+  .list button { min-height: 40px; padding: 6px 14px; font-size: .85rem; }
+  .back { position: fixed; top: 10px; left: max(16px, env(safe-area-inset-left, 0px)); z-index: 5; color: var(--fg); opacity: .7;
+          text-decoration: none; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; font-size: .9rem; padding: 8px 0; }
   .hint { max-width: 900px; margin: 0 auto; color: var(--muted); font-size: .95rem; margin: 0; }
 </style>
 </head>
 <body>
-<main>
+<section class="home" id="home" hidden>
+  <h1>Timers</h1>
+  <input type="search" id="search" placeholder="Search timers" aria-label="Search timers" autocomplete="off">
+  <form class="create" id="createForm">
+    <input type="text" id="newName" placeholder="New timer name" aria-label="New timer name" maxlength="40" autocomplete="off">
+    <button type="submit" id="createBtn">Create</button>
+  </form>
+  <p class="msg" id="msg" role="status"></p>
+  <ul class="list" id="list"></ul>
+  <p class="msg" id="empty" role="status"></p>
+</section>
+
+<a class="back" id="back" href="#/" hidden>&larr; Timers</a>
+<main id="timerView" hidden>
   <section class="display" id="display" aria-label="Countdown">
     <div class="banner" id="banner" role="alert" hidden></div>
     <div class="syncing" id="syncing" role="status" hidden>Syncing</div>
@@ -157,7 +185,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { getDatabase, ref, onValue, set, remove } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 
 // Firebase web settings. These identify the project and are safe to be public; the database rules protect the data.
 const firebaseConfig = {
@@ -182,6 +210,9 @@ const firebaseConfig = {
   var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, debounce = null;
   var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "", flashedFor = 0, goTimer = null, doneShown = false;
   var flashTimer = null, bannerTimer = null;
+  var curKey = null, timers = null, gen = 0, db = null, creating = false, lastSig = null;
+  var homeEl = $("home"), viewEl = $("timerView"), backEl = $("back"), searchEl = $("search"), nameEl = $("newName");
+  var createBtn = $("createBtn"), createForm = $("createForm"), msgEl = $("msg"), listEl = $("list"), emptyEl = $("empty");
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
@@ -355,7 +386,7 @@ const firebaseConfig = {
   // While a timer runs or is paused, the starter sees only Pause and Stop; everyone else sees no controls at all.
   function updateControls() {
     var hold = holding(state);
-    controlsEl.hidden = !ready || !canWrite || (hold && !mine(state));
+    controlsEl.hidden = !state || !ready || !canWrite || (hold && !mine(state));
     setBox.hidden = !!hold;
     pauseBtn.hidden = !(hold && mine(state));
   }
@@ -384,6 +415,7 @@ const firebaseConfig = {
     return Math.max(20, Math.min(byWidth, compact ? grouped : centered));
   }
   function fit() {
+    if (!curKey) return;
     timeEl.style.fontSize = "100px";
     var w = timeEl.getBoundingClientRect().width;
     if (w > 0) timeEl.style.fontSize = desiredFont(w / 100) + "px";
@@ -391,6 +423,7 @@ const firebaseConfig = {
   }
   // Re-check often: the web font can arrive after the first fit, the phone can rotate, controls can appear or hide.
   function fitIfNeeded() {
+    if (!curKey) return;
     var fs = parseFloat(timeEl.style.fontSize) || 0, w = timeEl.getBoundingClientRect().width;
     if (!fs || !w) { fit(); return; }
     var d = desiredFont(w / fs);
@@ -405,17 +438,13 @@ const firebaseConfig = {
   }
   if (window.ResizeObserver) new ResizeObserver(fitIfNeeded).observe(displayEl);
   function render() {
+    if (!curKey) return;
     if (timeEl.textContent.length !== fitLen) fit(); else fitIfNeeded();
     if (!state) {
       document.body.classList.remove("done");
-      if (connected) {                       // nothing running: show the default time and no message
-        timeEl.textContent = fmt(duration());
-        if (timeEl.textContent.length !== fitLen) fit();
-        statusEl.textContent = "";
-      } else {                               // still asking Firebase whether a timer exists
-        timeEl.textContent = "--:--";
-        statusEl.textContent = errMsg || "Searching for timers";
-      }
+      timeEl.textContent = "--:--";
+      if (connected) statusEl.textContent = "Timer not found";   // deleted, or a wrong link
+      else statusEl.textContent = errMsg || "Searching for timers";   // still asking Firebase
       setHint(); updateControls();
       return;
     }
@@ -484,19 +513,22 @@ const firebaseConfig = {
     syncMsgTimer = setTimeout(function () { if (pending === 0) syncEl.hidden = true; }, 4000);
   }
   function save(next) {
+    var g = gen;
     beginSync();           // first, so the screen does not treat the unconfirmed start as a finished one
     state = next; render();
     set(timerRef, next).then(function () {
+      if (g !== gen) return;                      // the person already left this timer
       if (next.running) { flashedFor = next.updatedAt; greenFlash(); }   // the server confirmed the start
       endSync();
     }).catch(function (e) {
+      if (g !== gen) return;
       endSync(); syncFailed();
       console.error("Timer write refused:", e && e.code, e && e.message);   // the live listener puts the real state back
     });
   }
   // Every write carries the same fields. updatedAt is server time; runId stays the same through pause and resume.
   function timerDoc(o) {
-    return { durationMs: o.durationMs, endAt: o.endAt || 0, running: !!o.running, paused: !!o.paused,
+    return { name: state.name, createdBy: state.createdBy, createdAt: state.createdAt, durationMs: o.durationMs, endAt: o.endAt || 0, running: !!o.running, paused: !!o.paused,
              remainingMs: o.remainingMs, owner: o.owner || "", runId: o.runId || 0, updatedAt: now() };
   }
   function duration() {
@@ -506,7 +538,7 @@ const firebaseConfig = {
   function onSetting() {
     clearTimeout(debounce);
     debounce = setTimeout(function () {
-      if (holding(state)) return;
+      if (!state || holding(state)) return;
       var d = duration(); syncedDuration = d;
       save(timerDoc({ durationMs: d, remainingMs: d }));
     }, 400);
@@ -515,7 +547,7 @@ const firebaseConfig = {
   secEl.addEventListener("change", onSetting);
 
   goBtn.addEventListener("click", function () {
-    if (!timerRef || !myId || pending > 0) return;
+    if (!timerRef || !myId || pending > 0 || !state) return;
     clearTimeout(debounce);
     if (holding(state)) {
       if (!mine(state)) return;                       // only the person who started it can stop it
@@ -538,34 +570,122 @@ const firebaseConfig = {
     }
   });
 
+  /* ---- homepage: list, search, create, delete ---- */
+  var NAME_RE = /^[A-Za-z0-9]+([ -][A-Za-z0-9]+)*$/;
+  function say(t) { msgEl.textContent = t || ""; }
+  function validTimer(d) { return !!(d && typeof d.durationMs === "number" && typeof d.name === "string"); }
+  function renderHome() {
+    if (curKey) return;
+    var q = searchEl.value.trim().toLowerCase();
+    var rows = Object.keys(timers || {}).filter(function (k) {
+      return validTimer(timers[k]) && timers[k].name.toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) { return timers[a].name.toLowerCase() < timers[b].name.toLowerCase() ? -1 : 1; })
+      .map(function (k) {
+        var t = timers[k];
+        return { k: k, name: t.name, tag: activeRun(t) ? "Running" : (isPaused(t) ? "Paused" : ""), del: !!(myId && t.createdBy === myId) };
+      });
+    emptyEl.textContent = timers === null ? (errMsg || "Searching for timers") : (rows.length ? "" : (q ? "No timers match" : "No timers yet"));
+    createBtn.disabled = !ready || !myId || creating;
+    var sig = JSON.stringify(rows);
+    if (sig === lastSig) return;                  // only rebuild when something changed, so clicks are never lost
+    lastSig = sig;
+    listEl.textContent = "";
+    rows.forEach(function (r) {
+      var li = document.createElement("li"), a = document.createElement("a");
+      a.className = "name"; a.href = "#/t/" + r.k; a.textContent = r.name; li.appendChild(a);
+      if (r.tag) { var tg = document.createElement("span"); tg.className = "tag"; tg.textContent = r.tag; li.appendChild(tg); }
+      if (r.del) {
+        var b = document.createElement("button"); b.type = "button"; b.className = "outline"; b.textContent = "Delete";
+        b.addEventListener("click", function () {
+          if (!window.confirm("Delete \"" + r.name + "\"? This can't be undone.")) return;
+          remove(ref(db, "timers/" + r.k)).then(function () { say(""); }).catch(function () { say("Couldn't delete it."); });
+        });
+        li.appendChild(b);
+      }
+      listEl.appendChild(li);
+    });
+  }
+  setInterval(renderHome, 1000);
+  searchEl.addEventListener("input", renderHome);
+  createForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var name = nameEl.value.replace(/\s+/g, " ").trim();
+    if (!name) return;
+    if (name.length > 40 || !NAME_RE.test(name)) { say("Use up to 40 letters, numbers, spaces or dashes."); return; }
+    var key = name.toLowerCase().replace(/ /g, "-");     // "Math Quiz" and "math-quiz" count as the same name
+    if (timers && timers[key]) { say("That name is taken."); return; }
+    if (!db || !myId) return;
+    creating = true; say(""); renderHome();
+    var d = 300000;
+    set(ref(db, "timers/" + key), { name: name, createdBy: myId, createdAt: now(), durationMs: d, endAt: 0, running: false,
+                                    paused: false, remainingMs: d, owner: "", runId: 0, updatedAt: now() })
+      .then(function () { nameEl.value = ""; say(""); })
+      .catch(function () { say("Couldn't create it. The name may be taken."); })
+      .then(function () { creating = false; renderHome(); });
+  });
+
+  /* ---- which page is showing ---- */
+  function resetTimerView() {
+    gen++;
+    state = null; connected = false; flashedFor = 0; cued = {}; alarmedFor = 0; doneShown = false; syncedDuration = -1;
+    pending = 0; clearTimeout(syncTimer); clearTimeout(syncMsgTimer); clearTimeout(bannerTimer); clearTimeout(flashTimer); clearTimeout(goTimer);
+    clearTimeout(debounce);
+    syncEl.hidden = true; bannerEl.hidden = true;
+    ["done", "flash", "go", "compact"].forEach(function (c) { document.body.classList.remove(c); });
+    timeEl.textContent = "--:--"; statusEl.textContent = ""; fitLen = -1;
+  }
+  function route() {
+    var m = /^#\/t\/([a-z0-9-]+)$/.exec(location.hash);
+    if (m) {
+      if (curKey === m[1]) return;
+      resetTimerView();
+      curKey = m[1];
+      timerRef = db ? ref(db, "timers/" + curKey) : null;
+      connected = timers !== null;
+      state = connected && validTimer(timers[curKey]) ? timers[curKey] : null;
+      homeEl.hidden = true; viewEl.hidden = false; backEl.hidden = false;
+      render(); fit();
+    } else {
+      resetTimerView();
+      curKey = null; timerRef = null; lastSig = null;
+      viewEl.hidden = true; backEl.hidden = true; homeEl.hidden = false;
+      renderHome();
+    }
+  }
+  window.addEventListener("hashchange", route);
+
   /* ---- connect to Firebase ---- */
   var slow = setTimeout(function () {
-    if (!connected) { errMsg = "Can't reach the timer yet"; render(); }
+    if (timers === null) { errMsg = "Can't reach the timers yet"; render(); renderHome(); }
   }, 10000);
 
   try {
     var app = initializeApp(firebaseConfig);
-    var db = getDatabase(app);
-    timerRef = ref(db, "timer");
+    db = getDatabase(app);
     onValue(ref(db, ".info/serverTimeOffset"), function (snap) { offset = snap.val() || 0; });
-    onValue(timerRef, function (snap) {
-      connected = true; errMsg = ""; clearTimeout(slow);
-      var d = snap.val();
-      state = (d && typeof d.durationMs === "number") ? d : null;
-      render();
+    onValue(ref(db, "timers"), function (snap) {
+      timers = snap.val() || {}; connected = true; errMsg = ""; clearTimeout(slow);
+      if (curKey) {
+        var d = timers[curKey];
+        state = validTimer(d) ? d : null;
+        timerRef = ref(db, "timers/" + curKey);
+        render();
+      } else renderHome();
     }, function () {
-      clearTimeout(slow); errMsg = "Can't reach the timer"; render();
+      clearTimeout(slow); errMsg = "Can't reach the timers"; render(); renderHome();
     });
-    // Anonymous sign-in gives each browser a private ID (no login). It is how "only the starter can stop it" is enforced.
+    // Anonymous sign-in gives each browser a private ID (no login). It is how "only the starter can stop it" and
+    // "only the creator can delete it" are enforced.
     var auth = getAuth(app);
     signInAnonymously(auth).then(function () {
-      myId = auth.currentUser.uid; canWrite = true; ready = true; render();
+      myId = auth.currentUser.uid; canWrite = true; ready = true; render(); renderHome();
     }).catch(function () {
-      canWrite = false; ready = true; render();
+      canWrite = false; ready = true; render(); renderHome();
     });
   } catch (e) {
-    clearTimeout(slow); errMsg = "Can't reach the timer"; render();
+    clearTimeout(slow); errMsg = "Can't reach the timers"; render(); renderHome();
   }
+  route();
 })();
 </script>
 </body>
