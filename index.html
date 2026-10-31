@@ -155,7 +155,7 @@
   <p class="msg" id="empty" role="status"></p>
 </section>
 
-<a class="back" id="back" href="#" hidden>&larr; Timers</a>
+<a class="back" id="back" href="#/" hidden>&larr; Timers</a>
 <main id="timerView" hidden>
   <section class="display" id="display" aria-label="Countdown">
     <div class="banner" id="banner" role="alert" hidden></div>
@@ -609,7 +609,7 @@ const firebaseConfig = {
     listEl.textContent = "";
     rows.forEach(function (r) {
       var li = document.createElement("li"), a = document.createElement("a");
-      a.className = "name"; a.href = "#" + r.k; a.textContent = r.name; li.appendChild(a);
+      a.className = "name"; a.href = "#/" + r.k; a.textContent = r.name; li.appendChild(a);
       if (r.tag) { var tg = document.createElement("span"); tg.className = "tag"; tg.textContent = r.tag; li.appendChild(tg); }
       if (r.del) {
         var b = document.createElement("button"); b.type = "button"; b.className = "outline"; b.textContent = "Delete";
@@ -654,10 +654,10 @@ const firebaseConfig = {
     ["done", "flash", "go", "compact"].forEach(function (c) { document.body.classList.remove(c); });
     timeEl.textContent = "--:--"; statusEl.textContent = ""; fitLen = -1;
   }
-  // Links look like .../synced-timer/#x08. Older link styles (#/t/x08) are converted.
+  // Links look like .../synced-timer/#/x08. Older styles (#/t/x08 and #x08) are converted.
   (function () {
-    var h = /^#\/t\/([A-Za-z0-9-]+)$/.exec(location.hash);
-    if (h) history.replaceState(null, "", location.pathname + "#" + h[1].toLowerCase());
+    var h = /^#(?:\/t)?\/?([A-Za-z0-9-]+)$/.exec(location.hash);
+    if (h) history.replaceState(null, "", location.pathname + "#/" + h[1].toLowerCase());
   })();
   function route() {
     var m = /^#(?:\/t)?\/?([A-Za-z0-9-]+)$/.exec(location.hash);
