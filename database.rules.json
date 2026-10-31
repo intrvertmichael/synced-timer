@@ -1,0 +1,16 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "timer": {
+      ".read": true,
+      ".write": "auth != null && (!data.exists() || data.child('running').val() !== true || data.child('endAt').val() <= now || data.child('owner').val() === auth.uid)",
+      ".validate": "newData.hasChildren(['durationMs','endAt','running','owner']) && (newData.child('running').val() === false || (newData.child('owner').val() === auth.uid && newData.child('endAt').val() >= now + newData.child('durationMs').val() - 10000 && newData.child('endAt').val() <= now + newData.child('durationMs').val() + 10000))",
+      "durationMs": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10800000" },
+      "endAt": { ".validate": "newData.isNumber()" },
+      "running": { ".validate": "newData.isBoolean()" },
+      "owner": { ".validate": "newData.isString() && newData.val().length <= 64" },
+      "$other": { ".validate": false }
+    }
+  }
+}

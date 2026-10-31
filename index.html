@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shared Timer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@600&display=swap">
+<style>
+  html { margin: 0; } body { margin: 0; }
+  /* Layout: black and white only. One big countdown inside a thin frame, controls underneath.
+     Orange is used only for the halfway and 1-minute flash, red only when time is up. */
+  :root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --muted: #666666;
+    --orange: #ff7a00;
+    --red: #d40000;
+    --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-time: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  }
+  /* Always white with black text, whatever the viewer's theme. */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: var(--font-body); font-size: 16px; line-height: 1.4;
+    padding-block: 24px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  h1 { font-family: var(--font-time); font-weight: 600; font-size: 1.6rem; letter-spacing: .12em; text-transform: uppercase; margin: 0; }
+
+  .display {
+    position: relative; margin-top: 14px; min-width: 0;
+    background: var(--bg); color: var(--fg); border: 2px solid var(--fg);
+    padding: 28px 16px 22px; text-align: center; border-radius: 24px;
+  }
+  .time {
+    font-family: var(--font-time); font-weight: 600; font-size: clamp(5rem, 30vw, 15rem);
+    line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .status { margin-top: 8px; font-size: 1rem; text-transform: uppercase; letter-spacing: .14em; opacity: .7; }
+
+  /* orange flash at the halfway and 1-minute points */
+  .display.flash { animation: flashOrange .7s ease-in-out 3; }
+  @keyframes flashOrange {
+    0%, 100% { background: var(--bg); color: var(--fg); }
+    50% { background: var(--orange); color: #000; }
+  }
+  /* red when time is up */
+  .display.done { background: var(--red); color: #fff; border-color: var(--red); }
+  .display.done .status { opacity: 1; font-weight: 600; }
+  .status:empty { display: none; }
+
+  /* a small shake every time a sound plays */
+  .shaker.shake { animation: shake .3s ease-in-out; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-7px); }
+    40% { transform: translateX(7px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+
+  /* notification sitting on the top edge of the timer */
+  .banner {
+    position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%); z-index: 2;
+    background: var(--orange); color: #000; border: 2px solid #000;
+    padding: 8px 20px; border-radius: 12px; font-weight: 600; font-size: 1.2rem; text-transform: uppercase; letter-spacing: .08em;
+    white-space: nowrap; max-width: 100%;
+    animation: bannerIn .25s ease-out;
+  }
+  @keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -30%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+  @media (max-width: 480px) { .banner { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .display.flash { animation: none; background: var(--orange); color: #000; }
+    .shaker.shake { animation: none; }
+    .banner { animation: none; }
+  }
+
+  button {
+    font: inherit; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; cursor: pointer;
+    padding: 12px 22px; min-height: 48px; border: 2px solid var(--fg); border-radius: 14px;
+    background: var(--fg); color: var(--bg);
+  }
+  button:disabled { background: transparent; color: var(--muted); border-color: var(--muted); cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+  .set { display: flex; gap: 16px; flex: 1 1 220px; min-width: 0; }
+  .set label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; flex: 1; min-width: 0; }
+  .set input, .set select {
+    font: inherit; font-size: 1.4rem; color: var(--fg); background: transparent; border-radius: 0;
+    border: 0; border-bottom: 2px solid var(--fg); padding: 6px 2px; min-height: 48px; width: 100%;
+  }
+  .set input:disabled, .set select:disabled { color: var(--muted); border-bottom-color: var(--muted); }
+  .btns { display: flex; flex: 1 1 200px; }
+  .btns button { flex: 1; }
+  .hint { color: var(--muted); font-size: .95rem; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <section class="display" id="display" aria-label="Countdown">
+    <div class="banner" id="banner" role="alert" hidden></div>
+    <div class="shaker" id="shaker">
+      <div class="time" id="time">--:--</div>
+      <div class="status" id="status" role="status">Connecting</div>
+    </div>
+  </section>
+
+  <section class="controls" id="controls" hidden>
+    <div class="set" id="setBox">
+      <label>Minutes<input type="number" id="min" min="0" max="180" step="1" value="5" inputmode="numeric"></label>
+      <label>Seconds<select id="sec"><option>0</option><option>15</option><option>30</option><option>45</option></select></label>
+    </div>
+    <div class="btns">
+      <button type="button" id="go">Start</button>
+    </div>
+  </section>
+
+  <p class="hint" id="hint"></p>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+// Firebase web settings. These identify the project and are safe to be public; the database rules protect the data.
+const firebaseConfig = {
+  apiKey: "AIzaSyBFdLUFw8mF_PH_ON_g1yCY0tBS7brvPI8",
+  authDomain: "synced-timer-7d8a5.firebaseapp.com",
+  databaseURL: "https://synced-timer-7d8a5-default-rtdb.firebaseio.com",   // check this against your Realtime Database page
+  projectId: "synced-timer-7d8a5",
+  storageBucket: "synced-timer-7d8a5.firebasestorage.app",
+  messagingSenderId: "191256256433",
+  appId: "1:191256256433:web:86a2c019c7d6e9f6396790"
+};
+
+(function () {
+
+  var $ = function (id) { return document.getElementById(id); };
+  var timeEl = $("time"), statusEl = $("status"), displayEl = $("display"), controlsEl = $("controls");
+  var shakerEl = $("shaker"), bannerEl = $("banner");
+  var minEl = $("min"), secEl = $("sec"), goBtn = $("go"), hintEl = $("hint"), setBox = $("setBox");
+
+  var SOUND_HINT = "Tap anywhere on this page once so your device allows sound.";
+  var timerRef = null, state = null, offset = 0, canWrite = true, connected = false, unlocked = false, ready = false, myId = null;
+  var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, chain = Promise.resolve(), debounce = null;
+  var flashTimer = null, bannerTimer = null;
+
+  function now() { return Date.now() + offset; }   // server time, so every device agrees
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function fmt(ms) { var s = Math.ceil(ms / 1000); return pad(Math.floor(s / 60)) + ":" + pad(s % 60); }
+  function remaining(s) { return s.running ? Math.max(0, s.endAt - now()) : s.durationMs; }
+  function isDone(s) { return s.running && s.endAt <= now(); }
+  function activeRun(s) { return s && s.running && !isDone(s); }
+  function mine(s) { return !!(s && s.owner && myId && s.owner === myId); }
+
+  /* ---- shake, flash and notification ---- */
+  function shake() {
+    shakerEl.classList.remove("shake");
+    void shakerEl.offsetWidth;            // restart the animation
+    shakerEl.classList.add("shake");
+  }
+  function shakeAt(delaysMs) { delaysMs.forEach(function (d) { setTimeout(shake, d); }); }
+  function notify(text) {
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+    displayEl.classList.remove("flash"); void displayEl.offsetWidth; displayEl.classList.add("flash");
+    clearTimeout(flashTimer); flashTimer = setTimeout(function () { displayEl.classList.remove("flash"); }, 2200);
+    clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 4500);
+  }
+
+  /* ---- sounds ---- */
+  function audio() {
+    try {
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (e) { ctx = null; }
+    return ctx;
+  }
+  // Nudge: two soft, short notes that step up (E5 then A5), like a gentle marimba tap. Quiet and friendly.
+  function nudge() {
+    shakeAt([0, 170]);
+    var c = audio(); if (!c) return;
+    var t = c.currentTime;
+    [659.25, 880].forEach(function (hz, i) {
+      var s = t + i * 0.17;
+      [[1, 0.2], [2, 0.04]].forEach(function (p) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = "sine"; o.frequency.value = hz * p[0];
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(p[1], s + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.55);
+        o.connect(g); g.connect(c.destination);
+        o.start(s); o.stop(s + 0.6);
+      });
+    });
+  }
+  // Soft bell: a rising C major arpeggio, each note a sine with two quiet overtones and a long fade.
+  function chime() {
+    var notes = [523.25, 659.25, 783.99, 1046.5];
+    shakeAt(notes.map(function (_, i) { return i * 350; }));
+    var c = audio(); if (!c) return;
+    var t = c.currentTime;
+    notes.forEach(function (hz, i) {
+      var s = t + i * 0.35;
+      [[1, 0.25], [2, 0.08], [3, 0.03]].forEach(function (p) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = "sine"; o.frequency.value = hz * p[0];
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(p[1], s + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 1.8);
+        o.connect(g); g.connect(c.destination);
+        o.start(s); o.stop(s + 1.9);
+      });
+    });
+  }
+  function startAlarm() { chime(); }   // rings once when time is up
+  function stopAlarm() {}
+
+  // Browsers only allow sound after a tap, click or key press, so the first one anywhere on the page switches it on.
+  var GESTURES = ["pointerdown", "keydown", "touchstart"];
+  function unlock() {
+    audio();
+    if (ctx) {
+      unlocked = true;
+      GESTURES.forEach(function (ev) { document.removeEventListener(ev, unlock, true); });
+      setHint();
+    }
+  }
+  GESTURES.forEach(function (ev) { document.addEventListener(ev, unlock, true); });
+
+  /* Nudge sound, flash and notice at the halfway point and when one minute is left (once each per run). */
+  function cues(s, rem) {
+    var d = s.durationMs, mid = d / 2, list = [];
+    var together = d > 60000 && Math.abs(mid - 60000) <= 2000;
+    list.push({ id: "mid", at: mid, text: together ? "Half way there · 1 min left" : "Half way there" });
+    if (d > 60000 && !together) list.push({ id: "min", at: 60000, text: "1 min left" });
+    list.forEach(function (q) {
+      var k = s.endAt + ":" + q.id;
+      if (cued[k] || rem > q.at) return;
+      cued[k] = true;
+      if (q.at - rem < 3000) { notify(q.text); nudge(); }   // stay quiet for cues that passed long ago (late joiners)
+    });
+  }
+
+  /* ---- showing the shared timer ---- */
+  // Only the sound reminder is ever shown, and only until the first tap.
+  function setHint() {
+    hintEl.textContent = unlocked ? "" : SOUND_HINT;
+    hintEl.hidden = unlocked;
+  }
+  // While a timer runs, the starter sees only Stop; everyone else sees no controls at all.
+  function updateControls() {
+    var active = activeRun(state);
+    controlsEl.hidden = !ready || !canWrite || (active && !mine(state));
+    setBox.hidden = !!active;
+  }
+  function render() {
+    if (!state) {
+      timeEl.textContent = "--:--";
+      displayEl.classList.remove("done");
+      statusEl.textContent = connected ? "Waiting for the timer to be set" : "Connecting";
+      setHint(); updateControls();
+      return;
+    }
+    var rem = remaining(state), done = isDone(state), active = activeRun(state);
+    timeEl.textContent = fmt(rem);
+    displayEl.classList.toggle("done", done);
+    if (done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
+    statusEl.textContent = done ? "Time is up" : "";
+
+    var locked = active && !mine(state);
+    goBtn.textContent = active ? (locked ? "Running" : "Stop") : (done ? "Start again" : "Start");
+    goBtn.disabled = locked;
+    minEl.disabled = secEl.disabled = active;
+    setHint(); updateControls();
+
+    if (active) cues(state, rem);
+    if (done) {
+      if (alarmedFor !== state.endAt) {
+        alarmedFor = state.endAt;
+        if (now() - state.endAt < 8000) startAlarm();
+      }
+    } else { stopAlarm(); }
+    if (!active && !done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
+
+    if (state.durationMs !== syncedDuration && document.activeElement !== minEl && document.activeElement !== secEl) {
+      syncedDuration = state.durationMs;
+      var total = Math.round(state.durationMs / 1000);
+      minEl.value = Math.floor(total / 60);
+      var s = total % 60; secEl.value = String([0, 15, 30, 45].indexOf(s) >= 0 ? s : 0);
+    }
+  }
+  setInterval(render, 250);
+
+
+  /* ---- changing the shared timer (one write at a time) ---- */
+  function save(next) {
+    state = next; render();
+    chain = chain.then(function () { return set(timerRef, next); }).catch(function () {
+      // Refused (for example someone else started first). The live listener puts the real state back.
+    });
+  }
+  function duration() {
+    var m = Math.max(0, Math.min(180, parseInt(minEl.value, 10) || 0));
+    return (m * 60 + parseInt(secEl.value, 10)) * 1000;
+  }
+  function onSetting() {
+    clearTimeout(debounce);
+    debounce = setTimeout(function () {
+      if (activeRun(state)) return;
+      var d = duration(); syncedDuration = d;
+      save({ durationMs: d, endAt: 0, running: false, owner: "" });
+    }, 400);
+  }
+  minEl.addEventListener("input", onSetting);
+  secEl.addEventListener("change", onSetting);
+
+  goBtn.addEventListener("click", function () {
+    if (!timerRef || !myId) return;
+    clearTimeout(debounce);
+    if (activeRun(state)) {
+      if (!mine(state)) return;                       // only the person who started it can stop it
+      save({ durationMs: state.durationMs, endAt: 0, running: false, owner: "" });
+    } else {
+      var d = duration(); if (d <= 0) return;
+      syncedDuration = d;
+      save({ durationMs: d, endAt: now() + d, running: true, owner: myId });
+    }
+  });
+
+  /* ---- connect to Firebase ---- */
+  var slow = setTimeout(function () {
+    if (!connected) { statusEl.textContent = "Can't reach the timer yet"; }
+  }, 10000);
+
+  try {
+    var app = initializeApp(firebaseConfig);
+    var db = getDatabase(app);
+    timerRef = ref(db, "timer");
+    onValue(ref(db, ".info/serverTimeOffset"), function (snap) { offset = snap.val() || 0; });
+    onValue(timerRef, function (snap) {
+      connected = true; clearTimeout(slow);
+      var d = snap.val();
+      state = (d && typeof d.durationMs === "number") ? d : null;
+      render();
+    }, function () {
+      clearTimeout(slow); statusEl.textContent = "Can't reach the timer";
+    });
+    // Anonymous sign-in gives each browser a private ID (no login). It is how "only the starter can stop it" is enforced.
+    var auth = getAuth(app);
+    signInAnonymously(auth).then(function () {
+      myId = auth.currentUser.uid; canWrite = true; ready = true; render();
+    }).catch(function () {
+      canWrite = false; ready = true; render();
+    });
+  } catch (e) {
+    clearTimeout(slow); statusEl.textContent = "Can't reach the timer";
+  }
+})();
+</script>
+</body>
+</html>
