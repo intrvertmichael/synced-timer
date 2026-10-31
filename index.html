@@ -27,27 +27,29 @@
   body {
     background: var(--bg); color: var(--fg);
     font-family: var(--font-body); font-size: 16px; line-height: 1.4;
-    padding-block: 24px 40px;
+    padding-block: 32px;
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
-  main { max-width: none; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  main {
+    max-width: none; margin: 0 auto; display: grid; grid-template-rows: 1fr auto 1fr;
+    min-height: calc(100vh - 64px); min-height: calc(100dvh - 64px);
+  }
+  /* Zero-height row so the controls never push the timer off center; they hang below it. */
+  .bottom { grid-row: 3; align-self: start; height: 0; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .bottom > * { position: relative; top: 56px; }
   h1 { font-family: var(--font-time); font-weight: 600; font-size: 1.6rem; letter-spacing: .12em; text-transform: uppercase; margin: 0; }
 
-  .display {
-    position: relative; margin-top: 14px; min-width: 0;
-    background: var(--bg); color: var(--fg); border: 2px solid var(--fg);
-    padding: 28px 16px 22px; text-align: center; border-radius: 24px;
-  }
+  .display { grid-row: 2; position: relative; min-width: 0; padding: 24px 16px; text-align: center; }
   .time {
     font-family: var(--font-time); font-weight: 600; font-size: 20vw;   /* JS sets the exact size so the digits fill 80% of the page width */
     display: inline-block; white-space: nowrap;
     line-height: 1; font-variant-numeric: tabular-nums;
   }
-  .status { margin-top: 8px; font-size: 1rem; text-transform: uppercase; letter-spacing: .14em; opacity: .7; }
+  .status { position: absolute; left: 0; right: 0; top: 100%; font-size: 1rem; text-transform: uppercase; letter-spacing: .14em; opacity: .7; }
 
   /* orange flash at the halfway and 1-minute points */
-  .display.flash { animation: flashOrange .7s ease-in-out 3; }
+  body.flash { animation: flashOrange .7s ease-in-out 3; }
   @keyframes flashOrange {
     0%, 100% { background: var(--bg); color: var(--fg); }
     50% { background: var(--orange); color: #000; }
@@ -56,8 +58,8 @@
   .time.go { animation: flashGreen .6s ease-in-out 3; }
   @keyframes flashGreen { 0%, 100% { color: var(--fg); } 50% { color: var(--green); } }
   /* red when time is up */
-  .display.done { background: var(--red); color: #fff; border-color: var(--red); }
-  .display.done .status { opacity: 1; font-weight: 600; }
+  body.done { --bg: var(--red); --fg: #ffffff; --muted: #ffd9d9; }
+  body.done .status { opacity: 1; font-weight: 600; }
   .status:empty { display: none; }
 
   /* a small shake every time a sound plays */
@@ -89,7 +91,7 @@
   @media (max-width: 480px) { .syncing { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } .banner { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } }
 
   @media (prefers-reduced-motion: reduce) {
-    .display.flash { animation: none; background: var(--orange); color: #000; }
+    body.flash { animation: none; background: var(--orange); color: #000; }
     .shaker.shake { animation: none; }
     .time.go { animation: none; color: var(--green); }
     .banner { animation: none; }
@@ -128,6 +130,7 @@
     </div>
   </section>
 
+  <div class="bottom">
   <section class="controls" id="controls" hidden>
     <div class="set" id="setBox">
       <label>Minutes<input type="number" id="min" min="0" max="180" step="1" value="5" inputmode="numeric"></label>
@@ -140,6 +143,7 @@
   </section>
 
   <p class="hint" id="hint"></p>
+  </div>
 </main>
 
 <script type="module">
@@ -196,8 +200,8 @@ const firebaseConfig = {
   function notify(text) {
     bannerEl.textContent = text;
     bannerEl.hidden = false;
-    displayEl.classList.remove("flash"); void displayEl.offsetWidth; displayEl.classList.add("flash");
-    clearTimeout(flashTimer); flashTimer = setTimeout(function () { displayEl.classList.remove("flash"); }, 2200);
+    document.body.classList.remove("flash"); void document.body.offsetWidth; document.body.classList.add("flash");
+    clearTimeout(flashTimer); flashTimer = setTimeout(function () { document.body.classList.remove("flash"); }, 2200);
     clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 4500);
   }
 
@@ -314,7 +318,7 @@ const firebaseConfig = {
   function render() {
     if (timeEl.textContent.length !== fitLen) fit(); else fitIfNeeded();
     if (!state) {
-      displayEl.classList.remove("done");
+      document.body.classList.remove("done");
       if (connected) {                       // nothing running: show the default time and no message
         timeEl.textContent = fmt(duration());
         if (timeEl.textContent.length !== fitLen) fit();
@@ -329,8 +333,8 @@ const firebaseConfig = {
     var rem = remaining(state), done = isDone(state), active = activeRun(state), paused = isPaused(state), hold = holding(state);
     timeEl.textContent = fmt(rem);
     if (timeEl.textContent.length !== fitLen) fit();
-    displayEl.classList.toggle("done", done);
-    if (done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
+    document.body.classList.toggle("done", done);
+    if (done) { document.body.classList.remove("flash"); bannerEl.hidden = true; }
     statusEl.textContent = done ? "Time is up" : (paused ? "Paused" : "");
 
     goBtn.textContent = hold ? "Stop" : (done ? "Start again" : "Start");
@@ -353,7 +357,7 @@ const firebaseConfig = {
         if (now() - state.endAt < 8000) startAlarm();
       }
     } else { stopAlarm(); }
-    if (!active && !done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
+    if (!active && !done) { document.body.classList.remove("flash"); bannerEl.hidden = true; }
     if (!state.running) timeEl.classList.remove("go");
 
     if (state.durationMs !== syncedDuration && document.activeElement !== minEl && document.activeElement !== secEl) {
