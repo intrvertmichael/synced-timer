@@ -204,6 +204,7 @@ const firebaseConfig = {
   function greenFlash() {
     document.body.classList.remove("go"); void document.body.offsetWidth; document.body.classList.add("go");
     clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 1000);
+    nudge();                                   // same soft two-note sound as the halfway point
   }
   // Notice boxes stay exactly as long as the orange flash lasts (0.7s x 3 = 2.1s).
   function showBanner(text, red) {
