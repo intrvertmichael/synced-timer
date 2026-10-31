@@ -205,17 +205,17 @@ const firebaseConfig = {
     document.body.classList.remove("go"); void document.body.offsetWidth; document.body.classList.add("go");
     clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 1000);
   }
-  // Notice boxes disappear after 4 seconds.
+  // Notice boxes stay exactly as long as the orange flash lasts (0.7s x 3 = 2.1s).
   function showBanner(text, red) {
     bannerEl.textContent = text;
     bannerEl.classList.toggle("red", !!red);
     bannerEl.hidden = false;
-    clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 4000);
+    clearTimeout(bannerTimer); bannerTimer = setTimeout(function () { bannerEl.hidden = true; }, 2100);
   }
   function notify(text) {
     showBanner(text, false);
     document.body.classList.remove("flash"); void document.body.offsetWidth; document.body.classList.add("flash");
-    clearTimeout(flashTimer); flashTimer = setTimeout(function () { document.body.classList.remove("flash"); }, 2200);
+    clearTimeout(flashTimer); flashTimer = setTimeout(function () { document.body.classList.remove("flash"); }, 2100);
   }
 
   /* ---- sounds ---- */
