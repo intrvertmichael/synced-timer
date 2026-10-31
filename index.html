@@ -15,7 +15,7 @@
     --muted: #666666;
     --orange: #ff7a00;
     --red: #d40000;
-    --green: #00a651;
+    --green: #00ff2a;
     --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-time: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   }
@@ -59,7 +59,7 @@
     50% { background: var(--orange); color: #000; }
   }
   /* the whole page flashes green when a timer starts (or resumes), on every device */
-  body.go { animation: flashGreen .6s ease-in-out 3; }
+  body.go { animation: flashGreen .8s ease-in-out 1; }
   @keyframes flashGreen {
     0%, 100% { background: var(--bg); color: var(--fg); }
     50% { background: var(--green); color: #000; }
@@ -179,7 +179,7 @@ const firebaseConfig = {
   var SOUND_HINT = "Tap anywhere on this page once so your device allows sound.";
   var timerRef = null, state = null, offset = 0, canWrite = true, connected = false, unlocked = false, ready = false, myId = null;
   var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, debounce = null;
-  var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "", flashedFor = 0, goTimer = null;
+  var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "", flashedFor = 0, goTimer = null, doneShown = false;
   var flashTimer = null, bannerTimer = null;
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
@@ -202,7 +202,7 @@ const firebaseConfig = {
   function shakeAt(delaysMs) { delaysMs.forEach(function (d) { setTimeout(shake, d); }); }
   function greenFlash() {
     document.body.classList.remove("go"); void document.body.offsetWidth; document.body.classList.add("go");
-    clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 2200);
+    clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 1000);
   }
   function notify(text) {
     bannerEl.textContent = text;
@@ -363,8 +363,13 @@ const firebaseConfig = {
     timeEl.textContent = fmt(rem);
     if (timeEl.textContent.length !== fitLen) fit();
     document.body.classList.toggle("done", done);
-    if (done) { document.body.classList.remove("flash"); bannerEl.hidden = true; }
-    statusEl.textContent = done ? "Time is up" : (paused ? "Paused" : "");
+    if (done) {
+      document.body.classList.remove("flash");
+      clearTimeout(bannerTimer);                 // stays up until the timer is started again
+      if (bannerEl.hidden || bannerEl.textContent !== "Time is up") { bannerEl.textContent = "Time is up"; bannerEl.hidden = false; }
+      doneShown = true;
+    } else if (doneShown) { bannerEl.hidden = true; doneShown = false; }
+    statusEl.textContent = paused ? "Paused" : "";
 
     goBtn.textContent = hold ? "Stop" : (done ? "Start again" : "Start");
     pauseBtn.textContent = paused ? "Resume" : "Pause";
