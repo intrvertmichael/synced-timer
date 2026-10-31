@@ -38,6 +38,10 @@
   /* Zero-height row so the controls never push the timer off center; they hang below it. */
   .bottom { grid-row: 3; align-self: start; height: 0; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
   .bottom > * { position: relative; top: 56px; }
+  /* Short screens (a phone on its side): the timer and its controls are centered together as one group instead. */
+  body.compact main { grid-template-rows: 1fr auto auto 1fr; }
+  body.compact .bottom { height: auto; margin-top: 28px; }
+  body.compact .bottom > * { top: 0; }
   h1 { font-family: var(--font-time); font-weight: 600; font-size: 1.6rem; letter-spacing: .12em; text-transform: uppercase; margin: 0; }
 
   .display { grid-row: 2; position: relative; min-width: 0; padding: 24px 16px; text-align: center; }
@@ -292,20 +296,42 @@ const firebaseConfig = {
     setBox.hidden = !!hold;
     pauseBtn.hidden = !(hold && mine(state));
   }
-  // Make the digits exactly 80% of the page width (never wider than the box they sit in).
+  // Size the digits: 80% of the page width, but small enough that the timer and the controls under it
+  // both fit on screen without scrolling (the timer stays centered, so the same room is kept above it).
+  var bottomEl = document.querySelector(".bottom");
   var fitLen = -1;
-  function fitTarget() { return Math.min(window.innerWidth * 0.8, displayEl.clientWidth - 32); }
+  function reserveBelow() {
+    var h = 0, n = 0;
+    Array.prototype.forEach.call(bottomEl.children, function (c) { if (!c.hidden && c.offsetHeight > 0) { h += c.offsetHeight; n++; } });
+    h += 24 * Math.max(0, n - 1);
+    return h ? 56 + h + 16 : 40;           // 56 = gap under the digits (room for the Paused / Time is up label)
+  }
+  function bottomHeight() {
+    var h = 0, n = 0;
+    Array.prototype.forEach.call(bottomEl.children, function (c) { if (!c.hidden && c.offsetHeight > 0) { h += c.offsetHeight; n++; } });
+    return h + 24 * Math.max(0, n - 1);
+  }
+  function desiredFont(widthPerPx) {
+    var byWidth = Math.min(window.innerWidth * 0.8, displayEl.clientWidth - 32) / widthPerPx;
+    var H = window.innerHeight, bh = bottomHeight();
+    var centered = H - 64 - 2 * reserveBelow() - 48;                            // timer dead center, controls hang below
+    var grouped = H - 64 - (bh ? bh + 28 : 40) - 48;                            // timer and controls centered together
+    var compact = Math.min(byWidth, centered) < 0.75 * Math.min(byWidth, grouped);
+    document.body.classList.toggle("compact", compact);
+    return Math.max(20, Math.min(byWidth, compact ? grouped : centered));
+  }
   function fit() {
-    var target = fitTarget();
     timeEl.style.fontSize = "100px";
     var w = timeEl.getBoundingClientRect().width;
-    if (w > 0 && target > 0) timeEl.style.fontSize = (100 * target / w) + "px";
+    if (w > 0) timeEl.style.fontSize = desiredFont(w / 100) + "px";
     fitLen = timeEl.textContent.length;
   }
-  // Re-check often: the web font can arrive after the first fit, the phone can rotate, scrollbars can appear.
+  // Re-check often: the web font can arrive after the first fit, the phone can rotate, controls can appear or hide.
   function fitIfNeeded() {
-    var target = fitTarget(), w = timeEl.getBoundingClientRect().width;
-    if (target > 0 && Math.abs(w - target) / target > 0.01) fit();
+    var fs = parseFloat(timeEl.style.fontSize) || 0, w = timeEl.getBoundingClientRect().width;
+    if (!fs || !w) { fit(); return; }
+    var d = desiredFont(w / fs);
+    if (Math.abs(d - fs) / d > 0.01) timeEl.style.fontSize = d + "px";
   }
   window.addEventListener("resize", fit);
   window.addEventListener("orientationchange", function () { setTimeout(fit, 200); });
