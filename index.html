@@ -654,13 +654,9 @@ const firebaseConfig = {
     ["done", "flash", "go", "compact"].forEach(function (c) { document.body.classList.remove(c); });
     timeEl.textContent = "--:--"; statusEl.textContent = ""; fitLen = -1;
   }
-  // Links look like .../synced-timer/#/x08. Older styles (#/t/x08 and #x08) are converted.
-  (function () {
-    var h = /^#(?:\/t)?\/?([A-Za-z0-9-]+)$/.exec(location.hash);
-    if (h) history.replaceState(null, "", location.pathname + "#/" + h[1].toLowerCase());
-  })();
+  // Links look like .../synced-timer/#/x08
   function route() {
-    var m = /^#(?:\/t)?\/?([A-Za-z0-9-]+)$/.exec(location.hash);
+    var m = /^#\/([A-Za-z0-9-]+)$/.exec(location.hash);
     if (m) {
       var key = m[1].toLowerCase();
       if (curKey === key) return;
