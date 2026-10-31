@@ -20,6 +20,7 @@
   }
   /* Always white with black text, whatever the viewer's theme. */
   :root { color-scheme: light; }
+  [hidden] { display: none !important; }
   * { box-sizing: border-box; }
   body {
     background: var(--bg); color: var(--fg);
@@ -28,7 +29,7 @@
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
-  main { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  main { max-width: none; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
   h1 { font-family: var(--font-time); font-weight: 600; font-size: 1.6rem; letter-spacing: .12em; text-transform: uppercase; margin: 0; }
 
   .display {
@@ -37,7 +38,8 @@
     padding: 28px 16px 22px; text-align: center; border-radius: 24px;
   }
   .time {
-    font-family: var(--font-time); font-weight: 600; font-size: clamp(5rem, 30vw, 15rem);
+    font-family: var(--font-time); font-weight: 600; font-size: 20vw;   /* JS sets the exact size so the digits fill 80% of the page width */
+    display: inline-block; white-space: nowrap;
     line-height: 1; font-variant-numeric: tabular-nums;
   }
   .status { margin-top: 8px; font-size: 1rem; text-transform: uppercase; letter-spacing: .14em; opacity: .7; }
@@ -95,7 +97,7 @@
   button:disabled { background: transparent; color: var(--muted); border-color: var(--muted); cursor: not-allowed; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+  .controls { width: 100%; max-width: 900px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
   .set { display: flex; gap: 16px; flex: 1 1 220px; min-width: 0; }
   .set label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; flex: 1; min-width: 0; }
   .set input, .set select {
@@ -105,7 +107,7 @@
   .set input:disabled, .set select:disabled { color: var(--muted); border-bottom-color: var(--muted); }
   .btns { display: flex; flex: 1 1 200px; }
   .btns button { flex: 1; }
-  .hint { color: var(--muted); font-size: .95rem; margin: 0; }
+  .hint { max-width: 900px; margin: 0 auto; color: var(--muted); font-size: .95rem; margin: 0; }
 </style>
 </head>
 <body>
@@ -270,11 +272,24 @@ const firebaseConfig = {
     controlsEl.hidden = !ready || !canWrite || (active && !mine(state));
     setBox.hidden = !!active;
   }
+  // Make the digits exactly 80% of the page width (never wider than the box they sit in).
+  var fitLen = -1;
+  function fit() {
+    var target = Math.min(window.innerWidth * 0.8, displayEl.clientWidth - 32);
+    timeEl.style.fontSize = "100px";
+    var w = timeEl.getBoundingClientRect().width;
+    if (w > 0 && target > 0) timeEl.style.fontSize = (100 * target / w) + "px";
+    fitLen = timeEl.textContent.length;
+  }
+  window.addEventListener("resize", fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
   function render() {
+    if (timeEl.textContent.length !== fitLen) fit();
     if (!state) {
       displayEl.classList.remove("done");
       if (connected) {                       // nothing running: show the default time and no message
         timeEl.textContent = fmt(duration());
+        if (timeEl.textContent.length !== fitLen) fit();
         statusEl.textContent = "";
       } else {                               // still asking Firebase whether a timer exists
         timeEl.textContent = "--:--";
@@ -285,6 +300,7 @@ const firebaseConfig = {
     }
     var rem = remaining(state), done = isDone(state), active = activeRun(state);
     timeEl.textContent = fmt(rem);
+    if (timeEl.textContent.length !== fitLen) fit();
     displayEl.classList.toggle("done", done);
     if (done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
     statusEl.textContent = done ? "Time is up" : "";
