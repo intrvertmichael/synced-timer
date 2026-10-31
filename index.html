@@ -15,6 +15,7 @@
     --muted: #666666;
     --orange: #ff7a00;
     --red: #d40000;
+    --green: #00a651;
     --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-time: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   }
@@ -50,6 +51,9 @@
     0%, 100% { background: var(--bg); color: var(--fg); }
     50% { background: var(--orange); color: #000; }
   }
+  /* the digits flash green when a timer starts (or resumes), on every device */
+  .time.go { animation: flashGreen .6s ease-in-out 3; }
+  @keyframes flashGreen { 0%, 100% { color: var(--fg); } 50% { color: var(--green); } }
   /* red when time is up */
   .display.done { background: var(--red); color: #fff; border-color: var(--red); }
   .display.done .status { opacity: 1; font-weight: 600; }
@@ -86,6 +90,7 @@
   @media (prefers-reduced-motion: reduce) {
     .display.flash { animation: none; background: var(--orange); color: #000; }
     .shaker.shake { animation: none; }
+    .time.go { animation: none; color: var(--green); }
     .banner { animation: none; }
   }
 
@@ -94,6 +99,7 @@
     padding: 12px 22px; min-height: 48px; border: 2px solid var(--fg); border-radius: 14px;
     background: var(--fg); color: var(--bg);
   }
+  button.outline { background: transparent; color: var(--fg); }
   button:disabled { background: transparent; color: var(--muted); border-color: var(--muted); cursor: not-allowed; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
 
@@ -105,7 +111,7 @@
     border: 0; border-bottom: 2px solid var(--fg); padding: 6px 2px; min-height: 48px; width: 100%;
   }
   .set input:disabled, .set select:disabled { color: var(--muted); border-bottom-color: var(--muted); }
-  .btns { display: flex; flex: 1 1 200px; }
+  .btns { display: flex; gap: 12px; flex: 1 1 200px; }
   .btns button { flex: 1; }
   .hint { max-width: 900px; margin: 0 auto; color: var(--muted); font-size: .95rem; margin: 0; }
 </style>
@@ -127,6 +133,7 @@
       <label>Seconds<select id="sec"><option>0</option><option>15</option><option>30</option><option>45</option></select></label>
     </div>
     <div class="btns">
+      <button type="button" id="pause" class="outline" hidden>Pause</button>
       <button type="button" id="go">Start</button>
     </div>
   </section>
@@ -155,20 +162,23 @@ const firebaseConfig = {
   var $ = function (id) { return document.getElementById(id); };
   var timeEl = $("time"), statusEl = $("status"), displayEl = $("display"), controlsEl = $("controls");
   var shakerEl = $("shaker"), bannerEl = $("banner"), syncEl = $("syncing");
-  var minEl = $("min"), secEl = $("sec"), goBtn = $("go"), hintEl = $("hint"), setBox = $("setBox");
+  var minEl = $("min"), secEl = $("sec"), goBtn = $("go"), pauseBtn = $("pause"), hintEl = $("hint"), setBox = $("setBox");
 
   var SOUND_HINT = "Tap anywhere on this page once so your device allows sound.";
   var timerRef = null, state = null, offset = 0, canWrite = true, connected = false, unlocked = false, ready = false, myId = null;
   var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, debounce = null;
-  var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "";
+  var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "", flashedFor = 0, goTimer = null;
   var flashTimer = null, bannerTimer = null;
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
   function fmt(ms) { var s = Math.ceil(ms / 1000); return pad(Math.floor(s / 60)) + ":" + pad(s % 60); }
-  function remaining(s) { return s.running ? Math.max(0, s.endAt - now()) : s.durationMs; }
+  function remaining(s) { return s.running ? Math.max(0, s.endAt - now()) : (s.paused ? s.remainingMs : s.durationMs); }
   function isDone(s) { return s.running && s.endAt <= now(); }
   function activeRun(s) { return s && s.running && !isDone(s); }
+  function isPaused(s) { return !!(s && s.paused && !s.running); }
+  // A timer holds the controls while it runs or is paused. A pause older than an hour is ignored so nobody stays locked out.
+  function holding(s) { return activeRun(s) || (isPaused(s) && now() - (s.updatedAt || 0) < 3600000); }
   function mine(s) { return !!(s && s.owner && myId && s.owner === myId); }
 
   /* ---- shake, flash and notification ---- */
@@ -178,6 +188,10 @@ const firebaseConfig = {
     shakerEl.classList.add("shake");
   }
   function shakeAt(delaysMs) { delaysMs.forEach(function (d) { setTimeout(shake, d); }); }
+  function greenFlash() {
+    timeEl.classList.remove("go"); void timeEl.offsetWidth; timeEl.classList.add("go");
+    clearTimeout(goTimer); goTimer = setTimeout(function () { timeEl.classList.remove("go"); }, 2200);
+  }
   function notify(text) {
     bannerEl.textContent = text;
     bannerEl.hidden = false;
@@ -253,7 +267,7 @@ const firebaseConfig = {
     list.push({ id: "mid", at: mid, text: together ? "Half way there · 1 min left" : "Half way there" });
     if (d > 60000 && !together) list.push({ id: "min", at: 60000, text: "1 min left" });
     list.forEach(function (q) {
-      var k = s.endAt + ":" + q.id;
+      var k = (s.runId || s.endAt) + ":" + q.id;
       if (cued[k] || rem > q.at) return;
       cued[k] = true;
       if (q.at - rem < 3000) { notify(q.text); nudge(); }   // stay quiet for cues that passed long ago (late joiners)
@@ -266,11 +280,12 @@ const firebaseConfig = {
     hintEl.textContent = unlocked ? "" : SOUND_HINT;
     hintEl.hidden = unlocked;
   }
-  // While a timer runs, the starter sees only Stop; everyone else sees no controls at all.
+  // While a timer runs or is paused, the starter sees only Pause and Stop; everyone else sees no controls at all.
   function updateControls() {
-    var active = activeRun(state);
-    controlsEl.hidden = !ready || !canWrite || (active && !mine(state));
-    setBox.hidden = !!active;
+    var hold = holding(state);
+    controlsEl.hidden = !ready || !canWrite || (hold && !mine(state));
+    setBox.hidden = !!hold;
+    pauseBtn.hidden = !(hold && mine(state));
   }
   // Make the digits exactly 80% of the page width (never wider than the box they sit in).
   var fitLen = -1;
@@ -298,18 +313,25 @@ const firebaseConfig = {
       setHint(); updateControls();
       return;
     }
-    var rem = remaining(state), done = isDone(state), active = activeRun(state);
+    var rem = remaining(state), done = isDone(state), active = activeRun(state), paused = isPaused(state), hold = holding(state);
     timeEl.textContent = fmt(rem);
     if (timeEl.textContent.length !== fitLen) fit();
     displayEl.classList.toggle("done", done);
     if (done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
-    statusEl.textContent = done ? "Time is up" : "";
+    statusEl.textContent = done ? "Time is up" : (paused ? "Paused" : "");
 
-    var locked = active && !mine(state);
-    goBtn.textContent = active ? (locked ? "Running" : "Stop") : (done ? "Start again" : "Start");
-    goBtn.disabled = locked || pending > 0;   // also off while a change is being sent
-    minEl.disabled = secEl.disabled = active;
+    goBtn.textContent = hold ? "Stop" : (done ? "Start again" : "Start");
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+    goBtn.disabled = pending > 0 || (hold && !mine(state));   // also off while a change is being sent
+    pauseBtn.disabled = pending > 0;
+    minEl.disabled = secEl.disabled = hold;
     setHint(); updateControls();
+
+    // Green flash when a timer starts or resumes. It shows on every device, so everyone knows it really started.
+    if (state.running && pending === 0 && state.updatedAt && state.updatedAt !== flashedFor) {
+      flashedFor = state.updatedAt;
+      if (now() - state.updatedAt < 4000) greenFlash();
+    }
 
     if (active) cues(state, rem);
     if (done) {
@@ -319,6 +341,7 @@ const firebaseConfig = {
       }
     } else { stopAlarm(); }
     if (!active && !done) { displayEl.classList.remove("flash"); bannerEl.hidden = true; }
+    if (!state.running) timeEl.classList.remove("go");
 
     if (state.durationMs !== syncedDuration && document.activeElement !== minEl && document.activeElement !== secEl) {
       syncedDuration = state.durationMs;
@@ -352,12 +375,20 @@ const firebaseConfig = {
     syncMsgTimer = setTimeout(function () { if (pending === 0) syncEl.hidden = true; }, 4000);
   }
   function save(next) {
+    beginSync();           // first, so the screen does not treat the unconfirmed start as a finished one
     state = next; render();
-    beginSync();
-    set(timerRef, next).then(endSync).catch(function (e) {
+    set(timerRef, next).then(function () {
+      if (next.running) { flashedFor = next.updatedAt; greenFlash(); }   // the server confirmed the start
+      endSync();
+    }).catch(function (e) {
       endSync(); syncFailed();
       console.error("Timer write refused:", e && e.code, e && e.message);   // the live listener puts the real state back
     });
+  }
+  // Every write carries the same fields. updatedAt is server time; runId stays the same through pause and resume.
+  function timerDoc(o) {
+    return { durationMs: o.durationMs, endAt: o.endAt || 0, running: !!o.running, paused: !!o.paused,
+             remainingMs: o.remainingMs, owner: o.owner || "", runId: o.runId || 0, updatedAt: now() };
   }
   function duration() {
     var m = Math.max(0, Math.min(180, parseInt(minEl.value, 10) || 0));
@@ -366,9 +397,9 @@ const firebaseConfig = {
   function onSetting() {
     clearTimeout(debounce);
     debounce = setTimeout(function () {
-      if (activeRun(state)) return;
+      if (holding(state)) return;
       var d = duration(); syncedDuration = d;
-      save({ durationMs: d, endAt: 0, running: false, owner: "" });
+      save(timerDoc({ durationMs: d, remainingMs: d }));
     }, 400);
   }
   minEl.addEventListener("input", onSetting);
@@ -377,13 +408,24 @@ const firebaseConfig = {
   goBtn.addEventListener("click", function () {
     if (!timerRef || !myId || pending > 0) return;
     clearTimeout(debounce);
-    if (activeRun(state)) {
+    if (holding(state)) {
       if (!mine(state)) return;                       // only the person who started it can stop it
-      save({ durationMs: state.durationMs, endAt: 0, running: false, owner: "" });
+      save(timerDoc({ durationMs: state.durationMs, remainingMs: state.durationMs }));
     } else {
       var d = duration(); if (d <= 0) return;
       syncedDuration = d;
-      save({ durationMs: d, endAt: now() + d, running: true, owner: myId });
+      save(timerDoc({ durationMs: d, endAt: now() + d, running: true, remainingMs: d, owner: myId, runId: now() }));
+    }
+  });
+
+  pauseBtn.addEventListener("click", function () {
+    if (!timerRef || !myId || pending > 0 || !holding(state) || !mine(state)) return;
+    if (isPaused(state)) {
+      save(timerDoc({ durationMs: state.durationMs, endAt: now() + state.remainingMs, running: true,
+                      remainingMs: state.remainingMs, owner: myId, runId: state.runId }));
+    } else {
+      save(timerDoc({ durationMs: state.durationMs, remainingMs: Math.max(0, state.endAt - now()), paused: true,
+                      owner: myId, runId: state.runId }));
     }
   });
 
