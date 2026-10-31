@@ -71,8 +71,15 @@
     white-space: nowrap; max-width: 100%;
     animation: bannerIn .25s ease-out;
   }
+  /* gray box in the same spot while a start/stop is being sent to the server */
+  .syncing {
+    position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%); z-index: 3;
+    background: #e6e6e6; color: #000; border: 2px solid #bdbdbd;
+    padding: 8px 20px; border-radius: 12px; font-weight: 600; font-size: 1.2rem; text-transform: uppercase; letter-spacing: .08em;
+    white-space: nowrap; max-width: 100%;
+  }
   @keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -30%); } to { opacity: 1; transform: translate(-50%, -50%); } }
-  @media (max-width: 480px) { .banner { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } }
+  @media (max-width: 480px) { .syncing { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } .banner { white-space: normal; text-align: center; font-size: 1rem; width: calc(100% - 24px); } }
 
   @media (prefers-reduced-motion: reduce) {
     .display.flash { animation: none; background: var(--orange); color: #000; }
@@ -105,6 +112,7 @@
 <main>
   <section class="display" id="display" aria-label="Countdown">
     <div class="banner" id="banner" role="alert" hidden></div>
+    <div class="syncing" id="syncing" role="status" hidden>Syncing</div>
     <div class="shaker" id="shaker">
       <div class="time" id="time">--:--</div>
       <div class="status" id="status" role="status">Connecting</div>
@@ -144,12 +152,13 @@ const firebaseConfig = {
 
   var $ = function (id) { return document.getElementById(id); };
   var timeEl = $("time"), statusEl = $("status"), displayEl = $("display"), controlsEl = $("controls");
-  var shakerEl = $("shaker"), bannerEl = $("banner");
+  var shakerEl = $("shaker"), bannerEl = $("banner"), syncEl = $("syncing");
   var minEl = $("min"), secEl = $("sec"), goBtn = $("go"), hintEl = $("hint"), setBox = $("setBox");
 
   var SOUND_HINT = "Tap anywhere on this page once so your device allows sound.";
   var timerRef = null, state = null, offset = 0, canWrite = true, connected = false, unlocked = false, ready = false, myId = null;
-  var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, chain = Promise.resolve(), debounce = null;
+  var ctx = null, alarm = null, alarmedFor = 0, cued = {}, syncedDuration = -1, debounce = null;
+  var pending = 0, syncTimer = null, syncMsgTimer = null;
   var flashTimer = null, bannerTimer = null;
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
@@ -301,10 +310,32 @@ const firebaseConfig = {
 
 
   /* ---- changing the shared timer (one write at a time) ---- */
+  // The screen updates at once. The gray "Syncing" box shows only if the server takes longer than a moment to confirm.
+  function beginSync() {
+    pending++;
+    if (pending === 1) {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(function () {
+        if (pending > 0) { clearTimeout(syncMsgTimer); syncEl.textContent = "Syncing"; syncEl.hidden = false; }
+      }, 200);
+    }
+  }
+  function endSync() {
+    pending = Math.max(0, pending - 1);
+    if (pending === 0) { clearTimeout(syncTimer); syncEl.hidden = true; }
+  }
+  function syncFailed() {
+    syncEl.textContent = "Couldn't sync";
+    syncEl.hidden = false;
+    clearTimeout(syncMsgTimer);
+    syncMsgTimer = setTimeout(function () { if (pending === 0) syncEl.hidden = true; }, 4000);
+  }
   function save(next) {
     state = next; render();
-    chain = chain.then(function () { return set(timerRef, next); }).catch(function () {
-      // Refused (for example someone else started first). The live listener puts the real state back.
+    beginSync();
+    set(timerRef, next).then(endSync).catch(function (e) {
+      endSync(); syncFailed();
+      console.error("Timer write refused:", e && e.code, e && e.message);   // the live listener puts the real state back
     });
   }
   function duration() {
