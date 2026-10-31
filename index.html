@@ -58,9 +58,12 @@
     0%, 100% { background: var(--bg); color: var(--fg); }
     50% { background: var(--orange); color: #000; }
   }
-  /* the digits flash green when a timer starts (or resumes), on every device */
-  .time.go { animation: flashGreen .6s ease-in-out 3; }
-  @keyframes flashGreen { 0%, 100% { color: var(--fg); } 50% { color: var(--green); } }
+  /* the whole page flashes green when a timer starts (or resumes), on every device */
+  body.go { animation: flashGreen .6s ease-in-out 3; }
+  @keyframes flashGreen {
+    0%, 100% { background: var(--bg); color: var(--fg); }
+    50% { background: var(--green); color: #000; }
+  }
   /* red when time is up */
   body.done { --bg: var(--red); --fg: #ffffff; --muted: #ffd9d9; }
   body.done .status { opacity: 1; font-weight: 600; }
@@ -97,7 +100,7 @@
   @media (prefers-reduced-motion: reduce) {
     body.flash { animation: none; background: var(--orange); color: #000; }
     .shaker.shake { animation: none; }
-    .time.go { animation: none; color: var(--green); }
+    body.go { animation: none; background: var(--green); color: #000; }
     .banner { animation: none; }
   }
 
@@ -198,8 +201,8 @@ const firebaseConfig = {
   }
   function shakeAt(delaysMs) { delaysMs.forEach(function (d) { setTimeout(shake, d); }); }
   function greenFlash() {
-    timeEl.classList.remove("go"); void timeEl.offsetWidth; timeEl.classList.add("go");
-    clearTimeout(goTimer); goTimer = setTimeout(function () { timeEl.classList.remove("go"); }, 2200);
+    document.body.classList.remove("go"); void document.body.offsetWidth; document.body.classList.add("go");
+    clearTimeout(goTimer); goTimer = setTimeout(function () { document.body.classList.remove("go"); }, 2200);
   }
   function notify(text) {
     bannerEl.textContent = text;
@@ -384,7 +387,7 @@ const firebaseConfig = {
       }
     } else { stopAlarm(); }
     if (!active && !done) { document.body.classList.remove("flash"); bannerEl.hidden = true; }
-    if (!state.running) timeEl.classList.remove("go");
+    if (!state.running) document.body.classList.remove("go");
 
     if (state.durationMs !== syncedDuration && document.activeElement !== minEl && document.activeElement !== secEl) {
       syncedDuration = state.durationMs;
