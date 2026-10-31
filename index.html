@@ -130,7 +130,8 @@
     font: inherit; font-size: 1.2rem; color: var(--fg); background: transparent; width: 100%; min-width: 0;
     padding: 12px 16px; min-height: 48px; border: 2px solid var(--fg); border-radius: 14px;
   }
-  .create { display: flex; gap: 12px; }
+  .create { display: flex; flex-wrap: wrap; gap: 12px; }
+  .create button { flex: 1 1 100%; overflow-wrap: anywhere; }
   .msg { color: var(--muted); margin: 0; min-height: 1.4em; }
   .list { list-style: none; margin: 0; padding: 0; }
   .list li { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #ddd; padding: 4px 0; }
@@ -145,10 +146,9 @@
 <body>
 <section class="home" id="home" hidden>
   <h1>Timers</h1>
-  <input type="search" id="search" placeholder="Search timers" aria-label="Search timers" autocomplete="off">
   <form class="create" id="createForm">
-    <input type="text" id="newName" placeholder="New timer name" aria-label="New timer name" maxlength="40" autocomplete="off">
-    <button type="submit" id="createBtn">Create</button>
+    <input type="text" id="search" placeholder="Search or name a new timer" aria-label="Search timers or name a new timer" maxlength="40" autocomplete="off">
+    <button type="submit" id="createBtn" hidden>Create</button>
   </form>
   <p class="msg" id="msg" role="status"></p>
   <ul class="list" id="list"></ul>
@@ -211,7 +211,7 @@ const firebaseConfig = {
   var pending = 0, syncTimer = null, syncMsgTimer = null, errMsg = "", flashedFor = 0, goTimer = null, doneShown = false;
   var flashTimer = null, bannerTimer = null;
   var curKey = null, timers = null, gen = 0, db = null, creating = false, lastSig = null;
-  var homeEl = $("home"), viewEl = $("timerView"), backEl = $("back"), searchEl = $("search"), nameEl = $("newName");
+  var homeEl = $("home"), viewEl = $("timerView"), backEl = $("back"), searchEl = $("search");
   var createBtn = $("createBtn"), createForm = $("createForm"), msgEl = $("msg"), listEl = $("list"), emptyEl = $("empty");
 
   function now() { return Date.now() + offset; }   // server time, so every device agrees
@@ -572,19 +572,36 @@ const firebaseConfig = {
 
   /* ---- homepage: list, search, create, delete ---- */
   var NAME_RE = /^[A-Za-z0-9]+([ -][A-Za-z0-9]+)*$/;
+  function typed() { return searchEl.value.replace(/\s+/g, " ").trim(); }
+  function keyOf(n) { return n.toLowerCase().replace(/ /g, "-"); }   // "Math Quiz" and "math-quiz" count as the same name
+  // Fuzzy match: 0 = starts with it, 1 = contains it, 2 = letters appear in order (skipping some), 9 = no match.
+  function score(name, q) {
+    if (!q) return 0;
+    var a = name.toLowerCase(), b = q.replace(/[ -]/g, "");
+    if (a.indexOf(q) === 0) return 0;
+    if (a.indexOf(q) > 0) return 1;
+    var c = a.replace(/[ -]/g, ""), i = 0;
+    for (var j = 0; j < c.length && i < b.length; j++) if (c[j] === b[i]) i++;
+    return i === b.length ? 2 : 9;
+  }
   function say(t) { msgEl.textContent = t || ""; }
   function validTimer(d) { return !!(d && typeof d.durationMs === "number" && typeof d.name === "string"); }
   function renderHome() {
     if (curKey) return;
-    var q = searchEl.value.trim().toLowerCase();
-    var rows = Object.keys(timers || {}).filter(function (k) {
-      return validTimer(timers[k]) && timers[k].name.toLowerCase().indexOf(q) >= 0;
-    }).sort(function (a, b) { return timers[a].name.toLowerCase() < timers[b].name.toLowerCase() ? -1 : 1; })
+    var q = typed().toLowerCase();
+    var rows = Object.keys(timers || {}).filter(function (k) { return validTimer(timers[k]) && score(timers[k].name, q) < 9; })
+      .sort(function (a, b) {
+        var d = score(timers[a].name, q) - score(timers[b].name, q);
+        return d || (timers[a].name.toLowerCase() < timers[b].name.toLowerCase() ? -1 : 1);
+      })
       .map(function (k) {
         var t = timers[k];
         return { k: k, name: t.name, tag: activeRun(t) ? "Running" : (isPaused(t) ? "Paused" : ""), del: !!(myId && t.createdBy === myId) };
       });
     emptyEl.textContent = timers === null ? (errMsg || "Searching for timers") : (rows.length ? "" : (q ? "No timers match" : "No timers yet"));
+    var n = typed(), can = !!n && timers !== null && NAME_RE.test(n) && n.length <= 40 && !timers[keyOf(n)];
+    createBtn.hidden = !can;
+    if (can) createBtn.textContent = "Create \u201c" + n + "\u201d";
     createBtn.disabled = !ready || !myId || creating;
     var sig = JSON.stringify(rows);
     if (sig === lastSig) return;                  // only rebuild when something changed, so clicks are never lost
@@ -606,20 +623,23 @@ const firebaseConfig = {
     });
   }
   setInterval(renderHome, 1000);
-  searchEl.addEventListener("input", renderHome);
+  searchEl.addEventListener("input", function () {
+    var n = typed();
+    say(n && (n.length > 40 || !NAME_RE.test(n)) ? "Names can only use letters, numbers, spaces and dashes." : "");
+    renderHome();
+  });
   createForm.addEventListener("submit", function (e) {
     e.preventDefault();
-    var name = nameEl.value.replace(/\s+/g, " ").trim();
-    if (!name) return;
-    if (name.length > 40 || !NAME_RE.test(name)) { say("Use up to 40 letters, numbers, spaces or dashes."); return; }
-    var key = name.toLowerCase().replace(/ /g, "-");     // "Math Quiz" and "math-quiz" count as the same name
+    var name = typed();
+    if (!name || createBtn.hidden) return;
+    var key = keyOf(name);
     if (timers && timers[key]) { say("That name is taken."); return; }
     if (!db || !myId) return;
     creating = true; say(""); renderHome();
     var d = 300000;
     set(ref(db, "timers/" + key), { name: name, createdBy: myId, createdAt: now(), durationMs: d, endAt: 0, running: false,
                                     paused: false, remainingMs: d, owner: "", runId: 0, updatedAt: now() })
-      .then(function () { nameEl.value = ""; say(""); })
+      .then(function () { searchEl.value = ""; say(""); })
       .catch(function () { say("Couldn't create it. The name may be taken."); })
       .then(function () { creating = false; renderHome(); });
   });
