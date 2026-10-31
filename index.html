@@ -286,7 +286,7 @@ const firebaseConfig = {
 
     var locked = active && !mine(state);
     goBtn.textContent = active ? (locked ? "Running" : "Stop") : (done ? "Start again" : "Start");
-    goBtn.disabled = locked;
+    goBtn.disabled = locked || pending > 0;   // also off while a change is being sent
     minEl.disabled = secEl.disabled = active;
     setHint(); updateControls();
 
@@ -312,7 +312,7 @@ const firebaseConfig = {
   /* ---- changing the shared timer (one write at a time) ---- */
   // The screen updates at once. The gray "Syncing" box shows only if the server takes longer than a moment to confirm.
   function beginSync() {
-    pending++;
+    pending++; render();
     if (pending === 1) {
       clearTimeout(syncTimer);
       syncTimer = setTimeout(function () {
@@ -321,7 +321,7 @@ const firebaseConfig = {
     }
   }
   function endSync() {
-    pending = Math.max(0, pending - 1);
+    pending = Math.max(0, pending - 1); render();
     if (pending === 0) { clearTimeout(syncTimer); syncEl.hidden = true; }
   }
   function syncFailed() {
@@ -354,7 +354,7 @@ const firebaseConfig = {
   secEl.addEventListener("change", onSetting);
 
   goBtn.addEventListener("click", function () {
-    if (!timerRef || !myId) return;
+    if (!timerRef || !myId || pending > 0) return;
     clearTimeout(debounce);
     if (activeRun(state)) {
       if (!mine(state)) return;                       // only the person who started it can stop it
